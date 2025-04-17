@@ -1,0 +1,295 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <title>Buscador de Lugares - Bolivia</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css" />
+  <style>
+    body {
+      font-size: 1.1rem;
+    }
+    #mapa {
+      height: 450px;
+      border: 2px solid #0d6efd;
+    }
+    .centrado {
+      text-align: center;
+    }
+    .scrollable-list {
+      max-height: 300px;
+      overflow-y: auto;
+      cursor: pointer;
+    }
+  </style>
+</head>
+<body class="bg-light">
+  <nav class="navbar navbar-dark bg-primary mb-4">
+    <div class="container-fluid justify-content-center">
+      <span class="navbar-brand mb-0 h1">Explora Bolivia - Buscador de Lugares</span>
+    </div>
+  </nav>
+
+  <div class="container">
+    <div class="row">
+      <!-- Panel lateral de filtros -->
+      <div class="col-md-3">
+        <div class="card mb-4 shadow-sm">
+          <div class="card-body">
+            <h5 class="card-title text-primary">Filtros</h5>
+            <form id="formulario">
+              <div class="mb-3">
+                <label for="radio" class="form-label">Distancia (m)</label>
+                <input type="range" id="radio" name="radio" value="1000" class="form-control" min="0" max="5000" required>
+                <div class="d-flex justify-content-between">
+                  <span>0</span>
+                  <span id="sliderValue">1000</span>
+                  <span>5000</span>
+                </div>
+              </div>
+              <div class="mb-3">
+                <label for="tipo" class="form-label">Tipo de lugar</label>
+                <select id="tipo" name="tipo" class="form-select">
+                  {% for t in tipos %}
+                    <option value="{{ t }}">{{ t }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+              <div class="mb-3">
+                <label for="coords" class="form-label">Coordenadas seleccionadas</label>
+                <input type="text" id="coords" class="form-control" readonly>
+              </div>
+              <button type="submit" class="btn btn-primary w-100">Buscar</button>
+              <button type="button" id="limpiar" class="btn btn-danger w-100 mt-2">Limpiar todo</button>
+            </form>
+            <button id="usarGPS" class="btn btn-outline-secondary mt-3 w-100">📍 Usar mi ubicación actual</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Mapa y resultados -->
+      <div class="col-md-9">
+        <div id="mapa" class="mb-4"></div>
+        <div id="estadisticas" class="mb-3"></div>
+        <div id="resultados" class="scrollable-list"></div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+  <script>
+    let mapa = L.map('mapa').setView([-16.5, -68.15], 13);
+let marcadorUsuario = null;
+let marcadores = [];
+let marcadorSeleccionado = null;
+
+// Íconos para los marcadores
+const iconoRojo = L.icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-red.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
+const iconoAzul = L.icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-blue.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
+const iconoVerde = L.icon({
+  iconUrl: 'https://raw.githubusercontent.com/pointhi/leaflet-color-markers/master/img/marker-icon-green.png',
+  shadowUrl: 'https://unpkg.com/leaflet@1.7.1/dist/images/marker-shadow.png',
+  iconSize: [25, 41],
+  iconAnchor: [12, 41],
+  popupAnchor: [1, -34],
+  shadowSize: [41, 41]
+});
+
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  attribution: '&copy; OpenStreetMap contributors'
+}).addTo(mapa);
+
+// Actualiza las coordenadas en el formulario
+function actualizarCoordenadas(latlng) {
+  document.getElementById("coords").value = `${latlng.lat.toFixed(6)}, ${latlng.lng.toFixed(6)}`;
+}
+
+// Usar la ubicación GPS
+document.getElementById("usarGPS").addEventListener("click", function() {
+  if (navigator.geolocation) {
+    navigator.geolocation.getCurrentPosition(function(pos) {
+      const latlng = [pos.coords.latitude, pos.coords.longitude];
+      if (marcadorUsuario) mapa.removeLayer(marcadorUsuario);
+      marcadorUsuario = L.marker(latlng, { icon: iconoRojo }).addTo(mapa);
+      marcadorUsuario.latlng = L.latLng(latlng);
+      mapa.setView(latlng, 15);
+      actualizarCoordenadas(marcadorUsuario.latlng);
+      manejarCambio(); // Realiza el llamado después de obtener la ubicación GPS
+    }, function() {
+      alert("No se pudo obtener tu ubicación.");
+    });
+  } else {
+    alert("Tu navegador no soporta geolocalización.");
+  }
+});
+
+// Clic en el mapa
+mapa.on('click', function(e) {
+  if (marcadorUsuario) mapa.removeLayer(marcadorUsuario);
+  marcadorUsuario = L.marker(e.latlng, { icon: iconoRojo }).addTo(mapa);
+  marcadorUsuario.latlng = e.latlng;
+  actualizarCoordenadas(e.latlng);
+  manejarCambio(); // Realiza el llamado cuando se hace clic en el mapa
+});
+
+// Buscar lugares
+document.getElementById("formulario").addEventListener("submit", async function(e) {
+  e.preventDefault();
+  if (!marcadorUsuario) {
+    alert("Selecciona una ubicación en el mapa o usa el GPS");
+    return;
+  }
+
+  const tipo = document.getElementById("tipo").value;
+  const radio = document.getElementById("radio").value;
+
+  const res = await fetch("/buscar", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      lat: marcadorUsuario.latlng.lat,
+      lon: marcadorUsuario.latlng.lng,
+      radio: radio,
+      tipo: tipo
+    })
+  });
+
+  const lugares = await res.json();
+  const resultadoDiv = document.getElementById("resultados");
+  const estadisticasDiv = document.getElementById("estadisticas");
+  resultadoDiv.innerHTML = "";
+  estadisticasDiv.innerHTML = "";
+  marcadores.forEach(m => mapa.removeLayer(m));
+  marcadores = [];
+
+  lugares.sort((a, b) => a.distancia - b.distancia);
+
+  if (lugares.length === 0) {
+    resultadoDiv.innerHTML = "<div class='alert alert-warning'>No se encontraron lugares con los filtros seleccionados.</div>";
+  } else {
+    estadisticasDiv.innerHTML = `
+      <div class='alert alert-info'>
+        Se encontraron <strong>${lugares.length}</strong> lugares. El más cercano está a <strong>${Math.round(lugares[0].distancia)} m</strong>.
+      </div>`;
+
+    const lista = document.createElement("ul");
+    lista.className = "list-group";
+    lugares.forEach((lugar, index) => {
+      const item = document.createElement("li");
+      item.className = "list-group-item d-flex align-items-center";
+      item.textContent = `${lugar.nombre} (${Math.round(lugar.distancia)} m)`;
+
+      item.addEventListener("click", function() {
+        mapa.setView([lugar.lat, lugar.lon], 13);
+        
+        // Si ya hay un marcador seleccionado, vuelve a azul
+        if (marcadorSeleccionado) {
+          marcadorSeleccionado.setIcon(iconoAzul);
+        }
+
+        // Añadir el nuevo marcador con el ícono verde
+        marcadorSeleccionado = L.marker([lugar.lat, lugar.lon], { icon: iconoVerde }).addTo(mapa)
+          .bindPopup(lugar.nombre);
+        
+        // Añadir el marcador a la lista
+        marcadores.push(marcadorSeleccionado);
+      });
+
+      lista.appendChild(item);
+
+      const marcador = L.marker([lugar.lat, lugar.lon], { icon: iconoAzul }).addTo(mapa)
+        .bindPopup(lugar.nombre);
+      marcadores.push(marcador);
+    });
+    resultadoDiv.appendChild(lista);
+  }
+});
+
+// Limpiar todo
+document.getElementById("limpiar").addEventListener("click", function () {
+  // Eliminar todos los marcadores
+  if (marcadorUsuario) {
+    mapa.removeLayer(marcadorUsuario);
+    marcadorUsuario = null;
+  }
+
+  marcadores.forEach(m => mapa.removeLayer(m));  // Limpiar todos los marcadores en el mapa
+  marcadores = [];  // Limpiar la lista de marcadores
+
+  if (marcadorSeleccionado) {
+    mapa.removeLayer(marcadorSeleccionado); // Limpiar el marcador seleccionado
+    marcadorSeleccionado = null;
+  }
+
+  // Limpiar coordenadas y estadísticas
+  document.getElementById("coords").value = "";
+  document.getElementById("resultados").innerHTML = "";  // Vaciar resultados
+  document.getElementById("estadisticas").innerHTML = "";  // Vaciar estadísticas
+  // Limpiar la lista de opciones en el select
+  const select = document.getElementById("tipo");
+  select.innerHTML = '';  // Limpiar las opciones existentes
+  select.appendChild(new Option('Seleccione tipo', ''));  // Opcional: Añadir la opción inicial
+});
+
+// Actualizar select con los tipos de lugares
+function actualizarSelect(tipos) {
+  const select = document.getElementById('tipo');
+  select.innerHTML = '';  // Limpiar opciones existentes
+  select.appendChild(new Option('Seleccione tipo', ''));
+  tipos.forEach(tipo => {
+    const option = new Option(tipo, tipo);
+    select.appendChild(option);
+  });
+}
+
+// Función para manejar el cambio en los inputs y hacer el llamado
+function manejarCambio() {
+  const coords = document.getElementById('coords').value;
+  const radio = document.getElementById('radio').value;
+
+  const latitud = coords.split(',')[0].trim();
+  const longitud = coords.split(',')[1].trim();
+
+  fetch(`/carga?latitud=${latitud}&longitud=${longitud}&radio=${radio}`)
+    .then(response => response.json())
+    .then(data => {
+      const tipos = data;
+      actualizarSelect(tipos);  // Actualizar el select con los tipos
+    })
+    .catch(error => console.error('Error al obtener los tipos:', error));
+}
+
+// Eventos para manejar cambios en los inputs
+document.getElementById('coords').addEventListener('input', manejarCambio);
+document.getElementById('radio').addEventListener('input', manejarCambio);
+
+// Obtener el slider y el valor mostrado
+const slider = document.getElementById("radio");
+const sliderValue = document.getElementById("sliderValue");
+
+// Escuchar el evento 'input' para actualizar el valor del slider
+slider.addEventListener("input", function() {
+  sliderValue.textContent = slider.value;  // Mostrar el valor actual del slider
+});
+
+  </script>
+
+</body>
+</html>
